@@ -1,7 +1,17 @@
 import questionary
+import typer
 from typing import List, Optional, Tuple, Dict
+from rich.console import Console
+from rich.panel import Panel
+from rich.columns import Columns
+from rich.text import Text
+from rich.table import Table
+from rich import box
 
 from cli.models import AnalystType
+from tradingagents.default_config import DEFAULT_CONFIG
+
+console = Console()
 
 ANALYST_ORDER = [
     ("Market Analyst", AnalystType.MARKET),
@@ -122,9 +132,132 @@ def select_research_depth() -> int:
     return choice
 
 
-def select_shallow_thinking_agent(provider) -> str:
-    """Select shallow thinking llm engine using an interactive selection."""
+def select_llm_provider() -> tuple[str, str, dict]:
+    """Select the LLM provider with support for default config and custom options."""
+    # Check if we should offer saved configs first
+    from cli.config_manager import select_saved_config, list_configs
+    
+    if list_configs():
+        use_saved = questionary.confirm(
+            "Would you like to use a saved configuration?",
+            default=False
+        ).ask()
+        
+        if use_saved:
+            saved_config = select_saved_config()
+            if saved_config:
+                return "saved_config", "saved_config", {"type": "saved_config", "config": saved_config}
+    
+    # Define LLM provider options
+    BASE_URLS = [
+        ("Default Config", "default", {"type": "default"}),
+        ("OpenAI", "https://api.openai.com/v1", {"type": "preset"}),
+        ("Custom OpenAI Compatible", "custom_openai", {"type": "custom_openai"}),
+        ("Anthropic", "https://api.anthropic.com/", {"type": "preset"}),
+        ("Google", "https://generativelanguage.googleapis.com/v1", {"type": "preset"}),
+        ("Openrouter", "https://openrouter.ai/api/v1", {"type": "preset"}),
+        ("Ollama", "http://localhost:11434/v1", {"type": "preset"}),        
+    ]
+    
+    choice = questionary.select(
+        "Select your LLM Provider:",
+        choices=[
+            questionary.Choice(display, value=(display, value, metadata))
+            for display, value, metadata in BASE_URLS
+        ],
+        instruction="\n- Use arrow keys to navigate\n- Press Enter to select",
+        style=questionary.Style(
+            [
+                ("selected", "fg:magenta noinherit"),
+                ("highlighted", "fg:magenta noinherit"),
+                ("pointer", "fg:magenta noinherit"),
+            ]
+        ),
+    ).ask()
+    
+    if choice is None:
+        console.print("\n[red]No LLM provider selected. Exiting...[/red]")
+        exit(1)
+    
+    display_name, url, metadata = choice
+    
+    if metadata["type"] == "default":
+        # Use default config
+        console.print(f"[green]Using default configuration from DEFAULT_CONFIG[/green]")
+        return "default", "default", {"type": "default"}
+    elif metadata["type"] == "custom_openai":
+        # Get custom OpenAI compatible settings
+        return get_custom_openai_config()
+    else:
+        # Preset provider
+        console.print(f"You selected: {display_name}\tURL: {url}")
+        return display_name, url, {"type": "preset"}
 
+
+def get_custom_openai_config() -> tuple[str, str, dict]:
+    """Get custom OpenAI compatible API configuration."""
+    console.print("\n[bold cyan]Custom OpenAI Compatible API Configuration[/bold cyan]")
+    
+    # Get custom API URL
+    custom_url = questionary.text(
+        "Enter custom API base URL:",
+        default="https://api.your-provider.com/v1",
+        instruction="Enter the base URL for your OpenAI-compatible API"
+    ).ask()
+    
+    if not custom_url:
+        console.print("\n[red]No URL provided. Exiting...[/red]")
+        exit(1)
+    
+    # Get custom models
+    custom_quick_model = questionary.text(
+        "Enter quick-thinking model name:",
+        default="gpt-4o-mini",
+        instruction="Enter the model name for quick thinking tasks"
+    ).ask()
+    
+    custom_deep_model = questionary.text(
+        "Enter deep-thinking model name:",
+        default="gpt-4o",
+        instruction="Enter the model name for deep thinking tasks"
+    ).ask()
+    
+    if not custom_quick_model or not custom_deep_model:
+        console.print("\n[red]Model names are required. Exiting...[/red]")
+        exit(1)
+    
+    console.print(f"[green]Custom OpenAI Config:[/green]")
+    console.print(f"  URL: {custom_url}")
+    console.print(f"  Quick Model: {custom_quick_model}")
+    console.print(f"  Deep Model: {custom_deep_model}")
+    
+    return "custom_openai", custom_url, {
+        "type": "custom_openai",
+        "quick_model": custom_quick_model,
+        "deep_model": custom_deep_model
+    }
+
+
+def select_shallow_thinking_agent(provider_info) -> str:
+    """Select shallow thinking llm engine using an interactive selection."""
+    provider, url, metadata = provider_info
+    
+    # Handle different provider types
+    if metadata["type"] == "default":
+        console.print(f"[green]Using default quick-thinking model: {DEFAULT_CONFIG['quick_think_llm']}[/green]")
+        return DEFAULT_CONFIG["quick_think_llm"]
+    elif metadata["type"] == "custom_openai":
+        console.print(f"[green]Using custom quick-thinking model: {metadata['quick_model']}[/green]")
+        return metadata["quick_model"]
+    elif metadata["type"] == "saved_config":
+        saved_config = metadata["config"]
+        model = saved_config.get("quick_think_llm", DEFAULT_CONFIG["quick_think_llm"])
+        console.print(f"[green]Using saved quick-thinking model: {model}[/green]")
+        return model
+    
+    # For preset providers, use the existing selection logic
+    provider_key = provider.lower()
+    
     # Define shallow thinking llm engine options with their corresponding model names
     SHALLOW_AGENT_OPTIONS = {
         "openai": [
@@ -155,11 +288,15 @@ def select_shallow_thinking_agent(provider) -> str:
         ]
     }
 
+    if provider_key not in SHALLOW_AGENT_OPTIONS:
+        console.print(f"[red]Unknown provider: {provider}. Exiting...[/red]")
+        exit(1)
+
     choice = questionary.select(
         "Select Your [Quick-Thinking LLM Engine]:",
         choices=[
             questionary.Choice(display, value=value)
-            for display, value in SHALLOW_AGENT_OPTIONS[provider.lower()]
+            for display, value in SHALLOW_AGENT_OPTIONS[provider_key]
         ],
         instruction="\n- Use arrow keys to navigate\n- Press Enter to select",
         style=questionary.Style(
@@ -180,8 +317,25 @@ def select_shallow_thinking_agent(provider) -> str:
     return choice
 
 
-def select_deep_thinking_agent(provider) -> str:
+def select_deep_thinking_agent(provider_info) -> str:
     """Select deep thinking llm engine using an interactive selection."""
+    provider, url, metadata = provider_info
+    
+    # Handle different provider types
+    if metadata["type"] == "default":
+        console.print(f"[green]Using default deep-thinking model: {DEFAULT_CONFIG['deep_think_llm']}[/green]")
+        return DEFAULT_CONFIG["deep_think_llm"]
+    elif metadata["type"] == "custom_openai":
+        console.print(f"[green]Using custom deep-thinking model: {metadata['deep_model']}[/green]")
+        return metadata["deep_model"]
+    elif metadata["type"] == "saved_config":
+        saved_config = metadata["config"]
+        model = saved_config.get("deep_think_llm", DEFAULT_CONFIG["deep_think_llm"])
+        console.print(f"[green]Using saved deep-thinking model: {model}[/green]")
+        return model
+    
+    # For preset providers, use the existing selection logic
+    provider_key = provider.lower()
 
     # Define deep thinking llm engine options with their corresponding model names
     DEEP_AGENT_OPTIONS = {
@@ -217,11 +371,15 @@ def select_deep_thinking_agent(provider) -> str:
         ]
     }
     
+    if provider_key not in DEEP_AGENT_OPTIONS:
+        console.print(f"[red]Unknown provider: {provider}. Exiting...[/red]")
+        exit(1)
+    
     choice = questionary.select(
         "Select Your [Deep-Thinking LLM Engine]:",
         choices=[
             questionary.Choice(display, value=value)
-            for display, value in DEEP_AGENT_OPTIONS[provider.lower()]
+            for display, value in DEEP_AGENT_OPTIONS[provider_key]
         ],
         instruction="\n- Use arrow keys to navigate\n- Press Enter to select",
         style=questionary.Style(
@@ -238,39 +396,3 @@ def select_deep_thinking_agent(provider) -> str:
         exit(1)
 
     return choice
-
-def select_llm_provider() -> tuple[str, str]:
-    """Select the OpenAI api url using interactive selection."""
-    # Define OpenAI api options with their corresponding endpoints
-    BASE_URLS = [
-        ("OpenAI", "https://api.openai.com/v1"),
-        ("Anthropic", "https://api.anthropic.com/"),
-        ("Google", "https://generativelanguage.googleapis.com/v1"),
-        ("Openrouter", "https://openrouter.ai/api/v1"),
-        ("Ollama", "http://localhost:11434/v1"),        
-    ]
-    
-    choice = questionary.select(
-        "Select your LLM Provider:",
-        choices=[
-            questionary.Choice(display, value=(display, value))
-            for display, value in BASE_URLS
-        ],
-        instruction="\n- Use arrow keys to navigate\n- Press Enter to select",
-        style=questionary.Style(
-            [
-                ("selected", "fg:magenta noinherit"),
-                ("highlighted", "fg:magenta noinherit"),
-                ("pointer", "fg:magenta noinherit"),
-            ]
-        ),
-    ).ask()
-    
-    if choice is None:
-        console.print("\n[red]no OpenAI backend selected. Exiting...[/red]")
-        exit(1)
-    
-    display_name, url = choice
-    print(f"You selected: {display_name}\tURL: {url}")
-    
-    return display_name, url

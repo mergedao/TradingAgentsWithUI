@@ -463,32 +463,53 @@ def get_user_selections():
     )
     selected_research_depth = select_research_depth()
 
-    # Step 5: OpenAI backend
+    # Step 5: LLM Provider
     console.print(
         create_question_box(
-            "Step 5: OpenAI backend", "Select which service to talk to"
+            "Step 5: LLM Provider", "Select your LLM provider and configuration"
         )
     )
-    selected_llm_provider, backend_url = select_llm_provider()
+    selected_llm_provider, backend_url, provider_metadata = select_llm_provider()
     
-    # Step 6: Thinking agents
-    console.print(
-        create_question_box(
-            "Step 6: Thinking Agents", "Select your thinking agents for analysis"
+    # Step 6: Thinking agents (handle different config types)
+    if provider_metadata["type"] == "saved_config":
+        # Use saved configuration
+        console.print(
+            create_question_box(
+                "Step 6: Saved Configuration", "Using models from saved configuration"
+            )
         )
-    )
-    selected_shallow_thinker = select_shallow_thinking_agent(selected_llm_provider)
-    selected_deep_thinker = select_deep_thinking_agent(selected_llm_provider)
+        selected_shallow_thinker = select_shallow_thinking_agent((selected_llm_provider, backend_url, provider_metadata))
+        selected_deep_thinker = select_deep_thinking_agent((selected_llm_provider, backend_url, provider_metadata))
+    elif provider_metadata["type"] == "default":
+        # Use default config
+        console.print(
+            create_question_box(
+                "Step 6: Default Configuration", "Using default models from configuration"
+            )
+        )
+        selected_shallow_thinker = select_shallow_thinking_agent((selected_llm_provider, backend_url, provider_metadata))
+        selected_deep_thinker = select_deep_thinking_agent((selected_llm_provider, backend_url, provider_metadata))
+    else:
+        # Interactive selection for other providers
+        console.print(
+            create_question_box(
+                "Step 6: Thinking Agents", "Select your thinking agents for analysis"
+            )
+        )
+        selected_shallow_thinker = select_shallow_thinking_agent((selected_llm_provider, backend_url, provider_metadata))
+        selected_deep_thinker = select_deep_thinking_agent((selected_llm_provider, backend_url, provider_metadata))
 
     return {
         "ticker": selected_ticker,
         "analysis_date": analysis_date,
         "analysts": selected_analysts,
         "research_depth": selected_research_depth,
-        "llm_provider": selected_llm_provider.lower(),
-        "backend_url": backend_url,
+        "llm_provider": selected_llm_provider.lower() if selected_llm_provider != "default" else DEFAULT_CONFIG["llm_provider"],
+        "backend_url": backend_url if backend_url != "default" else DEFAULT_CONFIG["backend_url"],
         "shallow_thinker": selected_shallow_thinker,
         "deep_thinker": selected_deep_thinker,
+        "provider_metadata": provider_metadata,
     }
 
 
@@ -735,14 +756,34 @@ def run_analysis():
     # First get all user selections
     selections = get_user_selections()
 
-    # Create config with selected research depth
-    config = DEFAULT_CONFIG.copy()
-    config["max_debate_rounds"] = selections["research_depth"]
-    config["max_risk_discuss_rounds"] = selections["research_depth"]
-    config["quick_think_llm"] = selections["shallow_thinker"]
-    config["deep_think_llm"] = selections["deep_thinker"]
-    config["backend_url"] = selections["backend_url"]
-    config["llm_provider"] = selections["llm_provider"].lower()
+    # Create config based on provider type
+    provider_metadata = selections["provider_metadata"]
+    
+    if provider_metadata["type"] == "saved_config":
+        # Use saved configuration as base
+        config = provider_metadata["config"].copy()
+        config["max_debate_rounds"] = selections["research_depth"]
+        config["max_risk_discuss_rounds"] = selections["research_depth"]
+        console.print("[green]Using saved configuration[/green]")
+    elif provider_metadata["type"] == "default":
+        # Use default config with only research depth modifications
+        config = DEFAULT_CONFIG.copy()
+        config["max_debate_rounds"] = selections["research_depth"]
+        config["max_risk_discuss_rounds"] = selections["research_depth"]
+        console.print("[green]Using complete default configuration[/green]")
+    else:
+        # Create config with selected options
+        config = DEFAULT_CONFIG.copy()
+        config["max_debate_rounds"] = selections["research_depth"]
+        config["max_risk_discuss_rounds"] = selections["research_depth"]
+        config["quick_think_llm"] = selections["shallow_thinker"]
+        config["deep_think_llm"] = selections["deep_thinker"]
+        config["backend_url"] = selections["backend_url"]
+        config["llm_provider"] = selections["llm_provider"]
+        
+        if provider_metadata["type"] == "custom_openai":
+            # For custom OpenAI, ensure we use openai provider type
+            config["llm_provider"] = "openai"
 
     # Initialize the graph
     graph = TradingAgentsGraph(
@@ -1092,6 +1133,12 @@ def run_analysis():
 
         # Display the complete final report
         display_complete_report(final_state)
+
+        # Ask to save configuration if it's not already saved
+        if provider_metadata["type"] not in ["saved_config", "default"]:
+            from cli.config_manager import ask_save_config, enhanced_config_with_description
+            enhanced_config = enhanced_config_with_description(config, selections)
+            ask_save_config(enhanced_config)
 
         update_display(layout)
 

@@ -10,13 +10,14 @@ DEFAULT_CONFIG = {
     ),
     # LLM settings
     "llm_provider": "openai",
-    "deep_think_llm": "o4-mini",
-    "quick_think_llm": "gpt-4o-mini",
-    "backend_url": "https://api.openai.com/v1",
+    "deep_think_llm": "deepseek-r1-250528",
+    "quick_think_llm": "doubao-seed-1-6-flash-250615",
+    # "backend_url": "https://api.openai.com/v1",
+    "backend_url": "https://ark.cn-beijing.volces.com/api/v3",
     # Debate and discussion settings
     "max_debate_rounds": 1,
     "max_risk_discuss_rounds": 1,
-    "max_recur_limit": 100,
+    "max_recur_limit": 1000,
     # Tool settings
     "online_tools": True,
 }

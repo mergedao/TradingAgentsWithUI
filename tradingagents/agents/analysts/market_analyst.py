@@ -55,6 +55,7 @@ Volume-Based Indicators:
                 (
                     "system",
                     "You are a helpful AI assistant, collaborating with other assistants."
+                    "you answer must be in Chinese"
                     " Use the provided tools to progress towards answering the question."
                     " If you are unable to fully answer, that's OK; another assistant with different tools"
                     " will help where you left off. Execute what you can to make progress."
